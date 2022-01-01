@@ -16,7 +16,8 @@
     -c, --chunksize=VALUE       Chunk size to send to AMSIScanBuffer,
                                   default=4096
     -h, -?, --help              Show Help
-  
+    -q, -fast,                 Search based on expressions instead of bytes.
+                               Should be faster
     
 For details see https://www.rythmstick.net/posts/amsitrigger
 
