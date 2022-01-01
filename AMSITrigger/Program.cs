@@ -25,6 +25,8 @@ namespace AmsiTrigger
         public static int amsiCalls = 0;
         public static int chunksProcessed = 0;
         public static int triggersFound = 0;
+        public static Boolean fast;
+        
     }
 
 
@@ -91,6 +93,7 @@ namespace AmsiTrigger
                 {"m|maxsiglength=","Maximum Signature Length to cater for, default=2048", (int o) => maxSignatureLength = o},
                 {"c|chunksize=","Chunk size to send to AMSIScanBuffer, default=4096", (int o) => chunkSize = o},
                 {"h|?|help","Show Help", o => help = true},
+                {"q|fast","search based on expressions instead of bytes. Should be faster",o=>fast=true }
             };
 
             try

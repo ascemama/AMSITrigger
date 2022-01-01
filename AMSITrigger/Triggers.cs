@@ -26,6 +26,11 @@ namespace AmsiTrigger
         private static int triggerStart = 0;
         private static int triggerEnd;
         private static int startIndex = 0;
+
+        private static int[] bigSampleByteToCharIdxArray;
+        private static int[] bigSampleCharToByteIdxArray;
+        private static string bigSampleStr;
+
         public static void FindTriggers()
         {
             AMSI_RESULT result;
@@ -37,9 +42,7 @@ namespace AmsiTrigger
 
 
             if (inScript != null)
-            {
-                bigSample = File.ReadAllBytes(inScript);
-            }
+                bigSample = File.ReadAllBytes(inScript);          
             else
             {
                 try
@@ -57,6 +60,27 @@ namespace AmsiTrigger
 
             }
 
+            if (fast)
+            {
+                //artefacts for the Byte[] <-> (UTF8) Char[] correspondance needed to locate separator ";" and "\n" 
+                bigSampleStr = Encoding.UTF8.GetString(bigSample);
+                
+                bigSampleByteToCharIdxArray = new int[bigSample.Length];
+                for (int i = 0; i < bigSampleByteToCharIdxArray.Length - 1; i++)
+                {
+                    var tmpArray = new byte[i];
+                    Array.Copy(bigSample, 0, tmpArray, 0, i);
+                    bigSampleByteToCharIdxArray[i] = Encoding.UTF8.GetCharCount(tmpArray);
+                }
+
+                bigSampleCharToByteIdxArray = new int[bigSampleStr.Length];
+                for (int i = 0; i < bigSampleCharToByteIdxArray.Length - 1; i++)
+                {
+                    var tmpNbBytes = Encoding.UTF8.GetByteCount(bigSampleStr.Substring(0, i));
+                    bigSampleCharToByteIdxArray[i] = tmpNbBytes;
+                }
+
+            }
 
             result = scanBuffer(bigSample, amsiContext);
             if (result != AMSI_RESULT.AMSI_RESULT_DETECTED)
@@ -85,8 +109,6 @@ namespace AmsiTrigger
         }
 
 
-
-
         private static void processChunk(byte[] chunkSample )
         {
             AMSI_RESULT result;
@@ -110,9 +132,10 @@ namespace AmsiTrigger
 
                 return;
             }
+             
             triggerEnd = findTriggerEnd() + 1;
             triggerStart = findTriggerStart(triggerEnd);
-
+            
 
             triggersFound++;
 
@@ -123,14 +146,20 @@ namespace AmsiTrigger
                        
         }
 
+
             private static int findTriggerEnd()
         {
-
             AMSI_RESULT result;
             byte[] tmpSample;
             int lastBytes;
+            int threshold=0;
 
-            for (int sampleIndex = 2; sampleIndex < chunkSample.Length + minSignatureLength; sampleIndex += minSignatureLength)
+           if(fast)
+                threshold = findClosestSeparatorByteIndex(sampleIndex,false) -sampleIndex;
+            else
+                threshold = minSignatureLength;
+
+            for (int sampleIndex = 2; sampleIndex < chunkSample.Length + minSignatureLength; sampleIndex += threshold)
             {
                 if (sampleIndex> chunkSample.Length) {
                     sampleIndex = chunkSample.Length;
@@ -139,15 +168,11 @@ namespace AmsiTrigger
                 Array.Copy(chunkSample, 0, tmpSample, 0, sampleIndex);
                 result = scanBuffer(tmpSample, amsiContext);
 
-
-
-
                 if (result == AMSI_RESULT.AMSI_RESULT_DETECTED)
                 {
 
                     for (lastBytes = 0; lastBytes < minSignatureLength; lastBytes++)
                     {
-
                         tmpSample = new byte[sampleIndex - lastBytes];
                         Array.Copy(chunkSample, 0, tmpSample, 0, sampleIndex - lastBytes);
                         result = scanBuffer(tmpSample, amsiContext);
@@ -163,21 +188,16 @@ namespace AmsiTrigger
         }
 
 
-
-
-
-
         private static int findTriggerStart(int triggerEnd)
         {
             AMSI_RESULT result;
             byte[] tmpSample;
-
-            for (int sampleIndex = triggerEnd-1; sampleIndex > 0; sampleIndex--)
+            int threshold;
+  
+            for (int sampleIndex = triggerEnd-1; sampleIndex > 0; sampleIndex-=threshold)
             {
-
                 tmpSample = new byte[triggerEnd-sampleIndex];
                 Array.Copy(chunkSample, sampleIndex, tmpSample, 0, triggerEnd - sampleIndex);
-                string ssstring = Encoding.Default.GetString(tmpSample);
                 result = scanBuffer(tmpSample, amsiContext);
 
                 if (result == AMSI_RESULT.AMSI_RESULT_DETECTED)
@@ -185,20 +205,48 @@ namespace AmsiTrigger
                     
                     return sampleIndex;
                 }
-
-            }
-            
+                if (fast)
+                    threshold = sampleIndex - findClosestSeparatorByteIndex(sampleIndex, true);
+                else
+                    threshold = minSignatureLength;
+            }  
             return 0;
         }
 
- 
+        private static int findClosestSeparatorByteIndex(int byteIndex, bool FindPrevious = false)
+        {
+            int UTF8CharIndex = bigSampleByteToCharIdxArray[byteIndex];
+
+            if ((UTF8CharIndex == 0 && FindPrevious) || (UTF8CharIndex == (bigSampleByteToCharIdxArray.Length - 1) && !FindPrevious))
+                return bigSampleCharToByteIdxArray[UTF8CharIndex];
+
+            //search ahead
+            if (!FindPrevious)
+                ++UTF8CharIndex;
+            //search backward
+            else
+                --UTF8CharIndex;
+
+            char character = bigSampleStr[UTF8CharIndex];
+            while (character != ';' && character != '\n' && UTF8CharIndex < bigSample.Length - 1 && UTF8CharIndex > 0)
+            {
+                if (!FindPrevious)
+                    ++UTF8CharIndex;
+                else
+                    --UTF8CharIndex;
+                character = bigSampleStr[UTF8CharIndex];
+            }
+            return bigSampleCharToByteIdxArray[UTF8CharIndex];
+        }
+
+
+
         private static void showText(byte[] output, int start, int length, Boolean highLight) 
             {
                 
                 byte[] tmpSample = new byte[length];
                 Array.Copy(output, start, tmpSample, 0, length);
 
-            
                switch (format)
                     {
 
@@ -259,7 +307,6 @@ namespace AmsiTrigger
             {
                 showText(sample, 0, sample.Length, false);
             }
-
 
             returnValue = AmsiScanBuffer(amsiContext, sample, (uint)sample.Length, "Sample", IntPtr.Zero, out result);
             amsiCalls++;
